@@ -304,13 +304,13 @@ def unsharpMask(stack, radius=2, amount=2):
     #     plt.show()
     return unsharp_mask(stack, radius, amount)
 
-def rescaleStackXY(stack, scaleFactor=2):
+def rescaleStackXY(stack, scaleFactor=2, order=1):
     # if scaleFactor == 1:
     #     return stack
 
     imList = []
     for im in stack:
-        imList.append(rescale(im, scaleFactor))
+        imList.append(rescale(im, scaleFactor, preserve_range=True, order=order))
 
     return np.array(imList)
 
