@@ -65,7 +65,7 @@ def labelStack(binarisedImageStack, minVolume=40):
 def stack3DTo4D(labeledStack, numLabels):
     print("\nstack3DTo4D")
 
-    if(numLabels > 150):
+    if (numLabels > 150):
         print("MEMORY WARNING: More than 150 labels, kernel algorithm could possibly run out of VRAM.")
 
     sliceArray = []
@@ -307,6 +307,8 @@ def calculateAllParameters(stackLabels, stackIntensities, metadata, scaleFactor=
                 propertiesDict['surface_area_3D_relative'] = meshRelative.area
                 propertiesDict['volume_3D_relative'] = meshRelative.volume
                 propertiesDict['extents_3D'] = meshRelative.extents
+                propertiesDict['sphericity'] = np.power(
+                    (36*np.pi*meshRelative.volume*meshRelative.volume), 1/3) / meshRelative.area
 
                 if canCalculateConvexHull:
                     propertiesDict['convex_area_3D_relative'] = meshRelative.convex_hull.area
@@ -391,7 +393,7 @@ def calculateAllParameters_scales(stackLabels, stackIntensities, XY_voxel_res_um
         # all skeleton oriented parameters note that I do not take "scaling" into account, since the
         # edges run in 3D which makes it hard to normalize exactly
         graph = sknw.build_sknw(pr.skeleton)
-        if(nx.number_of_edges(graph) != 0 and nx.number_of_nodes != 0):
+        if (nx.number_of_edges(graph) != 0 and nx.number_of_nodes != 0):
             propertiesDict["num_nodes"] = nx.number_of_nodes(graph)
             propertiesDict["num_edge"] = nx.number_of_edges(graph)
             propertiesDict["num_connected_components"] = nx.number_connected_components(
@@ -485,12 +487,14 @@ def calculateAllParameters_scales(stackLabels, stackIntensities, XY_voxel_res_um
                 propertiesDict['volume_3D_um'] = meshRelative.volume * XY_voxel_res_um * \
                     XY_voxel_res_um * XY_voxel_res_um  # I think this would give um^3
                 propertiesDict['extents_3D'] = meshRelative.extents
+                propertiesDict['sphericity'] = np.power(
+                    (36*np.pi*meshRelative.volume*meshRelative.volume), 1/3) / meshRelative.area
 
                 if canCalculateConvexHull:
                     propertiesDict['convex_area_3D_relative'] = meshRelative.convex_hull.area
                     propertiesDict['convex_volume_3D_relative'] = meshRelative.convex_hull.volume
-                    propertiesDict['convexity_3D_relative'] = meshRelative.convex_hull.area / \
-                        meshRelative.area
+                    propertiesDict['convexity_3D_relative'] =meshRelative.area / \
+                        meshRelative.convex_hull.area
                     propertiesDict['solidy_3D_relative'] = meshRelative.volume / \
                         meshRelative.convex_hull.volume
 
