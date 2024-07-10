@@ -4,6 +4,7 @@ from time import time
 import pandas as pd
 from skimage import measure
 from skimage import io
+import porespy as ps
 
 import matplotlib.pyplot as plt
 
@@ -23,6 +24,11 @@ from scipy.spatial import ConvexHull
 
 import ImageAnalysis
 
+from skimage.morphology import skeletonize_3d
+from skimage import data
+import sknw
+import networkx as nx
+
 
 def labelStack(binarisedImageStack, minVolume=40):
     (ar, countsArr) = np.unique(binarisedImageStack, return_counts=True)
@@ -33,9 +39,10 @@ def labelStack(binarisedImageStack, minVolume=40):
 
     # get all labels (similar to what I tried with watershed)
     labeled, numpatches = ndimage.label(binarisedImageStack)
-    
+
     # since labels start from 1 use this range
-    sizes = ndimage.sum(binarisedImageStack/np.max(binarisedImageStack), labeled, range(1, numpatches + 1))
+    sizes = ndimage.sum(
+        binarisedImageStack/np.max(binarisedImageStack), labeled, range(1, numpatches + 1))
     # print(np.sort(sizes.astype('uint32')))
 
     # to ensure "black background" is excluded add 1, and labels only start from 1
@@ -46,8 +53,9 @@ def labelStack(binarisedImageStack, minVolume=40):
     filteredBinary = filteredBinaryIndexes[labeled]
 
     labeledStack, numLabels = ndimage.label(filteredBinary)
-    print("Initial num labels: {}, num lables after filter: {}".format(numpatches, numLabels))
-    
+    print("Initial num labels: {}, num lables after filter: {}".format(
+        numpatches, numLabels))
+
     # sizes = ndimage.sum(filteredBinary/np.max(filteredBinary), labeledStack, range(1, numLabels + 1))
     # print(np.sort(sizes.astype('uint32')))
 
@@ -66,7 +74,8 @@ def stack3DTo4D(labeledStack, numLabels):
     sliceCount = 0
     print("Slice done: ", end='')
     for s in labeledStack:
-        frame_label_matrix = np.zeros((numLabels + 1, s.shape[0], s.shape[1], 1), dtype=np.float32)
+        frame_label_matrix = np.zeros(
+            (numLabels + 1, s.shape[0], s.shape[1], 1), dtype=np.float32)
 
         for y in range(0, s.shape[0]):
             for x in range(0, s.shape[1]):
@@ -74,7 +83,8 @@ def stack3DTo4D(labeledStack, numLabels):
                     try:
                         frame_label_matrix[s[y, x], y, x, 0] = 1
                     except:
-                        print("Not found: {} at x and y ({},{})".format(s[y, x], x, y))
+                        print("Not found: {} at x and y ({},{})".format(
+                            s[y, x], x, y))
 
                         # for i in frame2_label_matrix[0:50]:
         #    plt.imshow(i)
@@ -90,9 +100,10 @@ def stack3DTo4D(labeledStack, numLabels):
 
     return output
 
+
 def fullStackToMesh(stackLabels, scaleVector=None):
     if scaleVector == None:
-        scaleVector = [1,1,1,1]
+        scaleVector = [1, 1, 1, 1]
 
     print(stackLabels.shape)
     properties = measure.regionprops(stackLabels)
@@ -102,10 +113,12 @@ def fullStackToMesh(stackLabels, scaleVector=None):
         listOfCoords = np.vstack((listOfCoords, properties[index].coords))
 
     # print(listOfCoords)
-    return trimesh.voxel.base.ops.points_to_marching_cubes(listOfCoords).apply_transform(np.eye(4,4)*scaleVector)
+    return trimesh.voxel.base.ops.points_to_marching_cubes(listOfCoords).apply_transform(np.eye(4, 4)*scaleVector)
+
 
 def getMetadata(filename):
     return TiffMetadata.metadata(filename)
+
 
 def exportMeshAsPng(mesh, path, rotation):
     if not path.lower().endswith('.png'):
@@ -120,10 +133,11 @@ def exportMeshAsPng(mesh, path, rotation):
     file.write(pngBytes)
     file.close()
 
+
 def exportLabelSummary(MIP_image, mesh_image, infoDict, canCalculateConvexHull):
-    f, axarr = plt.subplots(2,2)
-    axarr[0,0].imshow(MIP_image)
-    axarr[1,0].imshow(mesh_image)
+    f, axarr = plt.subplots(2, 2)
+    axarr[0, 0].imshow(MIP_image)
+    axarr[1, 0].imshow(mesh_image)
     axarr[1, 0].axis('off')
 
     label = infoDict["label"]
@@ -153,7 +167,7 @@ def exportLabelSummary(MIP_image, mesh_image, infoDict, canCalculateConvexHull):
         text = ("Axis lengths: {} \n" +
                 "AspectRatio3D Main/Middle: {} \n" +
                 "AspectRatio3D Main/Minor: {} \n" +
-                "AspectRatio3D Middle/Minor: {} \n"+
+                "AspectRatio3D Middle/Minor: {} \n" +
                 "form_factor_3D_relative: {} \n").format(
             str(np.round(2*np.sqrt(infoDict['eigenvalues']), 3)),
             np.round(infoDict["AspectRatio3D Main/Middle"], 3),
@@ -161,20 +175,30 @@ def exportLabelSummary(MIP_image, mesh_image, infoDict, canCalculateConvexHull):
             np.round(infoDict['AspectRatio3D Middle/Minor'], 3),
             np.round(infoDict['form_factor_3D_relative'], 3))
 
-    axarr[0,1].text(0, 0, text, size="small", backgroundcolor='white', alpha=1.0, ha='left', va='top')
+    axarr[0, 1].text(0, 0, text, size="small",
+                     backgroundcolor='white', alpha=1.0, ha='left', va='top')
     axarr[0, 1].axis('off')
     axarr[1, 1].axis('off')
     plt.savefig('D:\\PhD\\3DStructureImages\\panels\\{}.png'.format(label))
     plt.close()
 
+
 def exportMesh(mesh, path, type):
     mesh.export(path, type)
 
+
 def calculateAllParameters(stackLabels, stackIntensities, metadata, scaleFactor=1, exportStructures3D=False, exportPath='', andExportPanel=False, dataExportFileName=''):
-    rescaledStackLabels = rescaleStackXY(stackLabels, 1/scaleFactor, order=0) # scale to original size using nearest neighbour (as to not change labels)
-    rescaledStackIntensities = rescaleStackXY(stackIntensities, 1/scaleFactor)
-    
-    properties3D = measure.regionprops(rescaledStackLabels, rescaledStackIntensities)
+    # scale to original size using nearest neighbour (as to not change labels)
+    rescaledStackLabels = ImageAnalysis.rescaleStackXY(
+        stackLabels, 1/scaleFactor, order=0)
+    rescaledStackIntensities = ImageAnalysis.rescaleStackXY(
+        stackIntensities, 1/scaleFactor)
+    # print(rescaledStackLabels.dtype)
+    # print(rescaledStackIntensities.dtype)
+
+    # properties3D = measure.regionprops(rescaledStackLabels.astype('uint32'), rescaledStackIntensities)
+    properties3D = ps.metrics.regionprops_3D(
+        rescaledStackLabels.astype('uint32'))
 
     labelPropertyList = []
     for pr in properties3D:
@@ -197,9 +221,14 @@ def calculateAllParameters(stackLabels, stackIntensities, metadata, scaleFactor=
                           'minor_axis_length': pr.minor_axis_length,
                           'aspect_ratio_major_minor': np.sqrt(
                               pr.inertia_tensor_eigvals[0] / pr.inertia_tensor_eigvals[-1]),
-                          'min_intensity': pr.min_intensity,
-                          'max_intensity': pr.max_intensity,
-                          'mean_intensity': pr.mean_intensity,
+                          #   'min_intensity': pr.min_intensity,
+                          #   'max_intensity': pr.max_intensity,
+                          #   'mean_intensity': pr.mean_intensity,
+                          'volume_ps': pr.volume,
+                          'surface_area_ps': pr.surface_area,
+                          'sphericity_ps': pr.sphericity,
+                          #   'convex_volume_ps': pr.convex_volume
+
                           # 'moments': pr.moments,
                           # 'moments_central': pr.moments_central,
                           # 'moments_normalized': pr.moments_normalized,
@@ -219,7 +248,8 @@ def calculateAllParameters(stackLabels, stackIntensities, metadata, scaleFactor=
                 'eccentricity'] = pr.eccentricity  # how circular is it [0, 1) where 0 is a circle. Sphere? sqrt(1 - major / minor)
             propertiesDict['moments_hu'] = pr.moments_hu
             propertiesDict['perimeter'] = pr.perimeter
-            propertiesDict['form_factor'] = pr.area * 4 * math.pi / (pr.perimeter ** 2)
+            propertiesDict['form_factor'] = pr.area * \
+                4 * math.pi / (pr.perimeter ** 2)
 
         elif pr._ndim == 3:  # exactly 3D
             scaleZ = (metadata.zVoxelWidth / metadata.xVoxelWidth)
@@ -243,10 +273,10 @@ def calculateAllParameters(stackLabels, stackIntensities, metadata, scaleFactor=
                     exportMeshAsPng(meshRelative, writePath, [180, -120, 0])
                 except:
                     try:
-                        exportMeshAsPng(meshRelative, writePath, [180, -120, 0])
+                        exportMeshAsPng(
+                            meshRelative, writePath, [180, -120, 0])
                     except:
                         print("Failed to export twice")
-
 
             '''
             # This gives the 'correct' answer for the eigen values, but I think it is less accurate since
@@ -259,13 +289,19 @@ def calculateAllParameters(stackLabels, stackIntensities, metadata, scaleFactor=
             propertiesDict['eigenvalues'] = eigenvalues
             # calculate lengths from http://ee263.stanford.edu/lectures/ellipsoids.pdf
             # calcualte lengths from https://math.stackexchange.com/questions/581702/correspondence-between-eigenvalues-and-eigenvectors-in-ellipsoids
-            propertiesDict['3D main axis length(unscaled)'] = 2 * np.sqrt(eigenvalues[0])
-            propertiesDict['3D middle axis length(unscaled)'] = 2 * np.sqrt(eigenvalues[1])
-            propertiesDict['3D minor axis length(unscaled)'] = 2 * np.sqrt(eigenvalues[2])
+            propertiesDict['3D main axis length(unscaled)'] = 2 * \
+                np.sqrt(eigenvalues[0])
+            propertiesDict['3D middle axis length(unscaled)'] = 2 * \
+                np.sqrt(eigenvalues[1])
+            propertiesDict['3D minor axis length(unscaled)'] = 2 * \
+                np.sqrt(eigenvalues[2])
 
-            propertiesDict['AspectRatio3D Main/Middle'] = (2 * np.sqrt(eigenvalues[0])) / (2 * np.sqrt(eigenvalues[1]))
-            propertiesDict['AspectRatio3D Main/Minor'] = (2 * np.sqrt(eigenvalues[0])) / (2 * np.sqrt(eigenvalues[2]))
-            propertiesDict['AspectRatio3D Middle/Minor'] = (2 * np.sqrt(eigenvalues[1])) / (2 * np.sqrt(eigenvalues[2]))
+            propertiesDict['AspectRatio3D Main/Middle'] = (
+                2 * np.sqrt(eigenvalues[0])) / (2 * np.sqrt(eigenvalues[1]))
+            propertiesDict['AspectRatio3D Main/Minor'] = (
+                2 * np.sqrt(eigenvalues[0])) / (2 * np.sqrt(eigenvalues[2]))
+            propertiesDict['AspectRatio3D Middle/Minor'] = (
+                2 * np.sqrt(eigenvalues[1])) / (2 * np.sqrt(eigenvalues[2]))
 
             try:
                 propertiesDict['surface_area_3D_relative'] = meshRelative.area
@@ -275,16 +311,19 @@ def calculateAllParameters(stackLabels, stackIntensities, metadata, scaleFactor=
                 if canCalculateConvexHull:
                     propertiesDict['convex_area_3D_relative'] = meshRelative.convex_hull.area
                     propertiesDict['convex_volume_3D_relative'] = meshRelative.convex_hull.volume
-                    propertiesDict['convexity_3D_relative'] = meshRelative.convex_hull.area / meshRelative.area
-                    propertiesDict['solidy_3D_relative'] = meshRelative.volume / meshRelative.convex_hull.volume
+                    propertiesDict['convexity_3D_relative'] = meshRelative.convex_hull.area / \
+                        meshRelative.area
+                    propertiesDict['solidy_3D_relative'] = meshRelative.volume / \
+                        meshRelative.convex_hull.volume
 
                 propertiesDict['form_factor_3D_relative'] = ((36 * math.pi * meshRelative.volume ** 2) / (
-                            meshRelative.area ** 3)) ** (1 / 3)
+                    meshRelative.area ** 3)) ** (1 / 3)
 
                 if exportStructures3D and andExportPanel:
                     mesh_image = io.imread(writePath)
                     MIP_image = np.max(pr.image, axis=0)
-                    exportLabelSummary(MIP_image, mesh_image, propertiesDict, canCalculateConvexHull)
+                    exportLabelSummary(MIP_image, mesh_image,
+                                       propertiesDict, canCalculateConvexHull)
 
             except:
                 print('\tCould not extract iso surface')
@@ -303,16 +342,24 @@ def calculateAllParameters(stackLabels, stackIntensities, metadata, scaleFactor=
 
 
 def calculateAllParameters_scales(stackLabels, stackIntensities, XY_voxel_res_um, Z__voxel_res_um, XY_scaleFactor=1, exportStructures3D=False, exportPath='', andExportPanel=False, dataExportFileName=''):
-    rescaledStackLabels = rescaleStackXY(stackLabels, 1/XY_scaleFactor, order=0) # scale to original size using nearest neighbour (as to not change labels)
-    rescaledStackIntensities = rescaleStackXY(stackIntensities, 1/XY_scaleFactor)
-    
-    
-    properties3D = measure.regionprops(rescaledStackLabels, rescaledStackIntensities)
+    # scale to original size using nearest neighbour (as to not change labels)
+    rescaledStackLabels = ImageAnalysis.rescaleStackXY(
+        stackLabels, 1/XY_scaleFactor, order=0).astype('int32')
+    rescaledStackIntensities = ImageAnalysis.rescaleStackXY(
+        stackIntensities, 1/XY_scaleFactor).astype('int32')
+    # print(np.unique(rescaledStackLabels))
+    # print(np.unique(rescaledStackLabels.astype('int32')))
+    # print(rescaledStackIntensities.dtype)
+
+    # properties3D = measure.regionprops(rescaledStackLabels, rescaledStackIntensities)
+    properties3D = ps.metrics.regionprops_3D(rescaledStackLabels)
+    print(len(properties3D))
 
     labelPropertyList = []
     for pr in properties3D:
-        # print('Label num:', len(labelPropertyList))
 
+        # print('Label num:', len(labelPropertyList))
+        # print("area = ", pr.area)
         # convex_image produces an ndarray - 3d?
         propertiesDict = {'area': pr.area,
                           # same as np.sum(stack4D[1]), which is the total number of voxels i.e. volume
@@ -326,22 +373,44 @@ def calculateAllParameters_scales(stackLabels, stackIntensities, XY_voxel_res_um
                           # 'inertia_tensor': pr.inertia_tensor,
                           # 'inertia_tensor_eigvals': pr.inertia_tensor_eigvals,
                           'label': pr.label,
-                          'major_axis_length': pr.major_axis_length,
-                          'minor_axis_length': pr.minor_axis_length,
+                          #   'major_axis_length': pr.major_axis_length,
+                          #   'minor_axis_length': pr.minor_axis_length,
                           'aspect_ratio_major_minor': np.sqrt(
                               pr.inertia_tensor_eigvals[0] / pr.inertia_tensor_eigvals[-1]),
-                          'min_intensity': pr.min_intensity,
-                          'max_intensity': pr.max_intensity,
-                          'mean_intensity': pr.mean_intensity,
+                          #   'min_intensity': pr.min_intensity,
+                          #   'max_intensity': pr.max_intensity,
+                          #   'mean_intensity': pr.mean_intensity,
+                          'volume_ps': pr.volume,
+                          'surface_area_ps': pr.surface_area,
+                          'sphericity_ps': pr.sphericity,
+                          #   'convex_volume_ps': pr.convex_volume
                           # 'moments': pr.moments,
                           # 'moments_central': pr.moments_central,
                           # 'moments_normalized': pr.moments_normalized,
                           }
+        # all skeleton oriented parameters note that I do not take "scaling" into account, since the
+        # edges run in 3D which makes it hard to normalize exactly
+        graph = sknw.build_sknw(pr.skeleton)
+        if(nx.number_of_edges(graph) != 0 and nx.number_of_nodes != 0):
+            propertiesDict["num_nodes"] = nx.number_of_nodes(graph)
+            propertiesDict["num_edge"] = nx.number_of_edges(graph)
+            propertiesDict["num_connected_components"] = nx.number_connected_components(
+                graph)
+            propertiesDict["num_isolates"] = nx.number_of_isolates(graph)
+            propertiesDict["num_self_loops"] = nx.number_of_selfloops(graph)
+            # edgeProperties["average_shortest_path_length"] = nx.average_shortest_path_length(graph)
+            propertiesDict["average_edge_length"] = graph.size(
+                weight="weight")/graph.number_of_edges()
+            # edgeProperties["average_degree_connectivity"] = nx.average_degree_connectivity(graph)
+            propertiesDict["total_edge_length"] = graph.size(weight="weight")
 
         canCalculateConvexHull = True
         try:
             propertiesDict['convex_area'] = pr.convex_area
             propertiesDict['solidity'] = pr.solidity
+
+            propertiesDict['major_axis_length'] = pr.major_axis_length
+            propertiesDict['minor_axis_length'] = pr.minor_axis_length
         except:
             # print("\tCould not calculate hull, since volume is 2D")
             canCalculateConvexHull = False
@@ -352,7 +421,8 @@ def calculateAllParameters_scales(stackLabels, stackIntensities, XY_voxel_res_um
                 'eccentricity'] = pr.eccentricity  # how circular is it [0, 1) where 0 is a circle. Sphere? sqrt(1 - major / minor)
             propertiesDict['moments_hu'] = pr.moments_hu
             propertiesDict['perimeter'] = pr.perimeter
-            propertiesDict['form_factor'] = pr.area * 4 * math.pi / (pr.perimeter ** 2)
+            propertiesDict['form_factor'] = pr.area * \
+                4 * math.pi / (pr.perimeter ** 2)
 
         elif pr._ndim == 3:  # exactly 3D
             scaleZ = (Z__voxel_res_um / XY_voxel_res_um)
@@ -360,26 +430,28 @@ def calculateAllParameters_scales(stackLabels, stackIntensities, XY_voxel_res_um
                 .apply_transform(
                 np.eye(4, 4) * np.array([scaleZ, 1, 1, 1]))  # since point order (Z, X, Y, W)
 
-            writePath = exportPath
-            if exportStructures3D:
-                label = pr.label
-                if label < 10:
-                    label = "00" + str(label)
-                elif label < 100:
-                    label = "0" + str(label)
-                else:
-                    label = str(label)
+            if len(exportPath) != 0:
+                writePath = exportPath
+                if exportStructures3D:
+                    label = pr.label
+                    if label < 10:
+                        label = "00" + str(label)
+                    elif label < 100:
+                        label = "0" + str(label)
+                    else:
+                        label = str(label)
 
-                writePath += "{}.png".format(label)
+                    writePath += "{}.png".format(label)
 
-                try:
-                    exportMeshAsPng(meshRelative, writePath, [180, -120, 0])
-                except:
                     try:
-                        exportMeshAsPng(meshRelative, writePath, [180, -120, 0])
+                        exportMeshAsPng(
+                            meshRelative, writePath, [180, -120, 0])
                     except:
-                        print("Failed to export twice")
-
+                        try:
+                            exportMeshAsPng(
+                                meshRelative, writePath, [180, -120, 0])
+                        except:
+                            print("Failed to export twice")
 
             '''
             # This gives the 'correct' answer for the eigen values, but I think it is less accurate since
@@ -392,40 +464,53 @@ def calculateAllParameters_scales(stackLabels, stackIntensities, XY_voxel_res_um
             propertiesDict['eigenvalues'] = eigenvalues
             # calculate lengths from http://ee263.stanford.edu/lectures/ellipsoids.pdf
             # calcualte lengths from https://math.stackexchange.com/questions/581702/correspondence-between-eigenvalues-and-eigenvectors-in-ellipsoids
-            propertiesDict['3D main axis length(unscaled)'] = 2 * np.sqrt(eigenvalues[0])
-            propertiesDict['3D middle axis length(unscaled)'] = 2 * np.sqrt(eigenvalues[1])
-            propertiesDict['3D minor axis length(unscaled)'] = 2 * np.sqrt(eigenvalues[2])
+            propertiesDict['3D main axis length(unscaled)'] = 2 * \
+                np.sqrt(eigenvalues[0])
+            propertiesDict['3D middle axis length(unscaled)'] = 2 * \
+                np.sqrt(eigenvalues[1])
+            propertiesDict['3D minor axis length(unscaled)'] = 2 * \
+                np.sqrt(eigenvalues[2])
 
-            propertiesDict['AspectRatio3D Main/Middle'] = (2 * np.sqrt(eigenvalues[0])) / (2 * np.sqrt(eigenvalues[1]))
-            propertiesDict['AspectRatio3D Main/Minor'] = (2 * np.sqrt(eigenvalues[0])) / (2 * np.sqrt(eigenvalues[2]))
-            propertiesDict['AspectRatio3D Middle/Minor'] = (2 * np.sqrt(eigenvalues[1])) / (2 * np.sqrt(eigenvalues[2]))
+            propertiesDict['AspectRatio3D Main/Middle'] = (
+                2 * np.sqrt(eigenvalues[0])) / (2 * np.sqrt(eigenvalues[1]))
+            propertiesDict['AspectRatio3D Main/Minor'] = (
+                2 * np.sqrt(eigenvalues[0])) / (2 * np.sqrt(eigenvalues[2]))
+            propertiesDict['AspectRatio3D Middle/Minor'] = (
+                2 * np.sqrt(eigenvalues[1])) / (2 * np.sqrt(eigenvalues[2]))
 
             try:
                 propertiesDict['surface_area_3D_relative'] = meshRelative.area
-                propertiesDict['volume_3D_relative'] = meshRelative.volume # this should be in voxel^3 and since a voxel has length 1x1x1 it could be considered unitless
-                propertiesDict['volume_3D_um'] = meshRelative.volume * XY_voxel_res_um * XY_voxel_res_um * XY_voxel_res_um # I think this would give um^3
+                # this should be in voxel^3 and since a voxel has length 1x1x1 it could be considered unitless
+                propertiesDict['volume_3D_relative'] = meshRelative.volume
+                propertiesDict['volume_3D_um'] = meshRelative.volume * XY_voxel_res_um * \
+                    XY_voxel_res_um * XY_voxel_res_um  # I think this would give um^3
                 propertiesDict['extents_3D'] = meshRelative.extents
 
                 if canCalculateConvexHull:
                     propertiesDict['convex_area_3D_relative'] = meshRelative.convex_hull.area
                     propertiesDict['convex_volume_3D_relative'] = meshRelative.convex_hull.volume
-                    propertiesDict['convexity_3D_relative'] = meshRelative.convex_hull.area / meshRelative.area
-                    propertiesDict['solidy_3D_relative'] = meshRelative.volume / meshRelative.convex_hull.volume
+                    propertiesDict['convexity_3D_relative'] = meshRelative.convex_hull.area / \
+                        meshRelative.area
+                    propertiesDict['solidy_3D_relative'] = meshRelative.volume / \
+                        meshRelative.convex_hull.volume
 
                 propertiesDict['form_factor_3D_relative'] = ((36 * math.pi * meshRelative.volume ** 2) / (
-                            meshRelative.area ** 3)) ** (1 / 3)
+                    meshRelative.area ** 3)) ** (1 / 3)
 
                 if exportStructures3D and andExportPanel:
                     mesh_image = io.imread(writePath)
                     MIP_image = np.max(pr.image, axis=0)
-                    exportLabelSummary(MIP_image, mesh_image, propertiesDict, canCalculateConvexHull)
+                    exportLabelSummary(MIP_image, mesh_image,
+                                       propertiesDict, canCalculateConvexHull)
 
             except:
-                print('\tLabel {} Could not extract iso surface'.format(len(labelPropertyList)))
+                print('\tLabel {} Could not extract iso surface'.format(
+                    len(labelPropertyList)))
 
         labelPropertyList.append(propertiesDict)
 
     dataFr = pd.DataFrame(labelPropertyList)
+    # print(dataFr)
 
     if len(dataExportFileName) != 0:
         if dataExportFileName.endswith('.xlsx'):
@@ -434,3 +519,64 @@ def calculateAllParameters_scales(stackLabels, stackIntensities, XY_voxel_res_um
             dataFr.to_excel(dataExportFileName + '.xlsx')
 
     return dataFr
+
+
+def getSkeletonProperties(image):
+    skeleton3d = skeletonize_3d(image)
+
+    # skeleton to graph
+    ske = skeleton3d
+    # build graph from skeleton
+    graph = sknw.build_sknw(ske)
+    # graphs = list(graph.subgraph(c) for c in nx.connected_components(graph))
+
+    # draw image
+    # fig = plt.figure(figsize=(15,15))
+    # ax = plt.gca()
+    # ax.invert_yaxis()
+
+    # # quickly visiualize the original and skeleton in their flattened state
+    # sampleFlattened = np.zeros_like(image[0])
+    # for i in range(1, image.shape[0]):
+    #     sampleFlattened = np.add(image[i], sampleFlattened)
+    # plt.imshow(sampleFlattened)
+    # plt.show()
+
+    # fig = plt.figure(figsize=(15,15))
+    # skeFlat = np.zeros_like(ske[0])
+    # for i in range(1, ske.shape[0]):
+    #     skeFlat = np.add(ske[i], skeFlat)
+    # plt.imshow(skeFlat, cmap='gray')
+    # plt.show()
+
+    # # draw edges by pts
+    # for i in range(0,len(graphs)):
+    #     for (s,e) in graphs[i].edges():
+    #         ps = graph[s][e]['pts']
+
+    #         #plt.plot(ps[:,2], ps[:,1], color=cm.prism(i*3), lw=3)
+    #         plt.plot(ps[:,2], ps[:,1], color='r', lw=1)
+
+    # # draw node by o
+    # fig = plt.figure(figsize=(15,15))
+    # node, nodes = graph.nodes, graph.nodes()
+    # ps = np.array([node[i]['o'] for i in nodes])
+    # plt.plot( ps[:,2], ps[:,1], 'r.')
+    # plt.show()
+    # fig.savefig(str("img") + "graph.png")
+    #    print(nx.info(graph))
+
+    edgeProperties = {}
+    edgeProperties["num_nodes"] = nx.number_of_nodes(graph)
+    edgeProperties["num_edge"] = nx.number_of_edges(graph)
+    edgeProperties["num_connected_components"] = nx.number_connected_components(
+        graph)
+    edgeProperties["num_isolates"] = nx.number_of_isolates(graph)
+    edgeProperties["num_self_loops"] = nx.number_of_selfloops(graph)
+    # edgeProperties["average_shortest_path_length"] = nx.average_shortest_path_length(graph)
+    edgeProperties["average_edge_length"] = graph.size(
+        weight="weight")/graph.number_of_edges()
+    # edgeProperties["average_degree_connectivity"] = nx.average_degree_connectivity(graph)
+    edgeProperties["total_edge_length"] = graph.size(weight="weight")
+
+    return graph, edgeProperties
